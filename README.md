@@ -1,3 +1,7 @@
+# forked from UniClaude
+
+- Change: i just did a security review with claude and cursor
+
 # UniClaude
 
 [![Version](https://img.shields.io/badge/version-0.3.0%20%22Sharpening%20Tools%22-blue)](CHANGELOG.md)
