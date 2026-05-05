@@ -45,8 +45,12 @@ namespace UniClaude.Editor
         /// <summary>When true, only error-level sidecar logs appear in the Unity Console.</summary>
         public bool VerboseLogging = false;
 
-        /// <summary>When true, UniClaude MCP tools are auto-approved without prompting.</summary>
-        public bool AutoAllowMCPTools = true;
+        /// <summary>
+        /// When true, UniClaude MCP tools are auto-approved without prompting.
+        /// Defaults to false so every tool call surfaces a permission prompt; users can
+        /// opt in from Settings once they have audited UniClaude's behaviour for their project.
+        /// </summary>
+        public bool AutoAllowMCPTools = false;
 
         /// <summary>
         /// Maximum token budget for the project tree summary in Tier 1 context.

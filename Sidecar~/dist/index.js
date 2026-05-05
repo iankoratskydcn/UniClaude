@@ -22,5 +22,11 @@ function parseArgs(args) {
     return { port, mcpPort };
 }
 const { port, mcpPort } = parseArgs(process.argv.slice(2));
-(0, server_js_1.createServer)({ port, mcpPort });
+const authToken = process.env.UNICLAUDE_AUTH_TOKEN ?? "";
+if (!authToken || authToken.length < 16) {
+    console.error("Error: UNICLAUDE_AUTH_TOKEN env var is missing or too short. " +
+        "This binary is intended to be spawned by the Unity Editor, not run directly.");
+    process.exit(1);
+}
+(0, server_js_1.createServer)({ port, mcpPort, authToken });
 //# sourceMappingURL=index.js.map

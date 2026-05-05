@@ -24,4 +24,17 @@ function parseArgs(args: string[]): { port: number; mcpPort: number } {
 }
 
 const { port, mcpPort } = parseArgs(process.argv.slice(2));
-createServer({ port, mcpPort });
+
+// The auth token is supplied by Unity via env var. Without it the sidecar would
+// expose its HTTP API to any local process and the Unity MCP server would reject
+// every callback — refuse to start so a misconfigured deployment fails loudly.
+const authToken = process.env.UNICLAUDE_AUTH_TOKEN ?? "";
+if (!authToken || authToken.length < 16) {
+  console.error(
+    "Error: UNICLAUDE_AUTH_TOKEN env var is missing or too short. " +
+      "This binary is intended to be spawned by the Unity Editor, not run directly."
+  );
+  process.exit(1);
+}
+
+createServer({ port, mcpPort, authToken });

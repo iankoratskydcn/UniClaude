@@ -163,6 +163,19 @@ namespace UniClaude.Editor.Tests.MCP
         }
 
         [Test]
+        public void SetComponentProperty_MScriptBlocked_ReturnsError()
+        {
+            _tempGO.AddComponent<Camera>();
+
+            var result = ComponentTools.SetComponentProperty(
+                "ComponentToolsTestGO", "Camera", "m_Script", "null");
+
+            Assert.IsTrue(result.IsError);
+            StringAssert.Contains("m_Script", result.Text);
+            StringAssert.Contains("not allowed", result.Text);
+        }
+
+        [Test]
         public void SetComponentProperty_NotFound_ListsValid()
         {
             var result = ComponentTools.SetComponentProperty(
@@ -231,6 +244,31 @@ namespace UniClaude.Editor.Tests.MCP
             Assert.IsTrue(_tempGO.GetComponent<BoxCollider>().isTrigger);
             Assert.IsTrue(go2.GetComponent<BoxCollider>().isTrigger);
             Object.DestroyImmediate(go2);
+        }
+
+        [Test]
+        public void SetProperties_MScriptBlocked_ReturnsErrorInErrorsList()
+        {
+            _tempGO.AddComponent<Camera>();
+
+            var input = JsonConvert.SerializeObject(new[]
+            {
+                new
+                {
+                    gameObject = "ComponentToolsTestGO",
+                    component = "Camera",
+                    properties = new Dictionary<string, string>
+                    {
+                        { "m_Script", "null" }
+                    }
+                }
+            });
+
+            var result = ComponentTools.SetProperties(input);
+
+            Assert.IsFalse(result.IsError, "SetProperties returns a success wrapper with per-property errors.");
+            Assert.That(result.Text, Does.Contain("m_Script"));
+            Assert.That(result.Text, Does.Contain("not allowed"));
         }
 
         [Test]

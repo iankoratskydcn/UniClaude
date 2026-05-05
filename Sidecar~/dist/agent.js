@@ -134,7 +134,7 @@ class AgentRunner {
                     mcpServers: {
                         "uniclaude-unity": {
                             type: "http",
-                            url: `http://127.0.0.1:${this._mcpPort}/rpc`,
+                            url: this._buildMcpUrl(this._mcpPort),
                         },
                     },
                     promptSuggestions: true,
@@ -460,6 +460,13 @@ class AgentRunner {
             pending.resolve({ type: "deny", timeout: true });
         }
         this._pendingDecisions.clear();
+    }
+    _buildMcpUrl(port) {
+        const base = `http://127.0.0.1:${port}/rpc`;
+        const token = this._options.authToken;
+        if (!token)
+            return base;
+        return `${base}?token=${encodeURIComponent(token)}`;
     }
 }
 exports.AgentRunner = AgentRunner;

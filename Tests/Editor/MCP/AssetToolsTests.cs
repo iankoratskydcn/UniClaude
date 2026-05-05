@@ -166,6 +166,18 @@ namespace UniClaude.Editor.Tests.MCP
             Assert.That(result.Text, Does.Contain("Source asset not found"));
         }
 
+        [Test]
+        public void MoveAsset_DestinationBlocked_ReturnsError()
+        {
+            var sourcePath = CreateTempAsset("move_source_blocked.txt", "move me");
+            var forbiddenDest = "Packages/com.arcforge.uniclaude/evil/move_dest.txt";
+
+            var result = AssetTools.MoveAsset(sourcePath, forbiddenDest);
+
+            Assert.IsTrue(result.IsError);
+            Assert.That(result.Text, Does.Contain("Packages/com.arcforge.uniclaude"));
+        }
+
         // ── ImportAsset ──
 
         /// <summary>

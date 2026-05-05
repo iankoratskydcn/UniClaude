@@ -163,5 +163,102 @@ namespace UniClaude.Editor.Tests.MCP
         {
             Assert.Throws<InvalidOperationException>(() => PathSandbox.ResolveWritable(".git\\hooks/pre-commit"));
         }
+
+        // -------------------------------------------------------------------------
+        // Newly blocked write locations
+        // -------------------------------------------------------------------------
+
+        [Test]
+        public void ResolveWritable_LibraryDirectory_Throws()
+        {
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                PathSandbox.ResolveWritable("Library/UniClaude/settings.json"));
+            Assert.That(ex.Message, Does.Contain("Library"));
+        }
+
+        // -------------------------------------------------------------------------
+        // Newly blocked read locations
+        // -------------------------------------------------------------------------
+
+        [Test]
+        public void Resolve_GitDirectory_Throws()
+        {
+            var ex = Assert.Throws<InvalidOperationException>(() => PathSandbox.Resolve(".git/config"));
+            Assert.That(ex.Message, Does.Contain(".git"));
+        }
+
+        [Test]
+        public void Resolve_LibraryDirectory_Throws()
+        {
+            var ex = Assert.Throws<InvalidOperationException>(() => PathSandbox.Resolve("Library/somefile.txt"));
+            Assert.That(ex.Message, Does.Contain("Library"));
+        }
+
+        [Test]
+        public void Resolve_LogsDirectory_Throws()
+        {
+            var ex = Assert.Throws<InvalidOperationException>(() => PathSandbox.Resolve("Logs/some.log"));
+            Assert.That(ex.Message, Does.Contain("Logs"));
+        }
+
+        [Test]
+        public void ResolveWritable_PackagesManifest_Throws()
+        {
+            Assert.Throws<InvalidOperationException>(() =>
+                PathSandbox.ResolveWritable("Packages/manifest.json"));
+        }
+
+        [Test]
+        public void ResolveWritable_PackagesLockFile_Throws()
+        {
+            Assert.Throws<InvalidOperationException>(() =>
+                PathSandbox.ResolveWritable("Packages/packages-lock.json"));
+        }
+
+        [Test]
+        public void ResolveWritable_UniClaudePackageDirectory_Throws()
+        {
+            Assert.Throws<InvalidOperationException>(() =>
+                PathSandbox.ResolveWritable("Packages/com.arcforge.uniclaude/Editor/foo.cs"));
+        }
+
+        [Test]
+        public void ResolveWritable_BlockedPathWithDotSlashPrefix_Throws()
+        {
+            Assert.Throws<InvalidOperationException>(() =>
+                PathSandbox.ResolveWritable("./Packages/manifest.json"));
+        }
+
+        [Test]
+        public void ResolveWritable_OtherPackagesAreFine()
+        {
+            // Packages/com.unity.something/foo.cs is not under the UniClaude package and is
+            // not the manifest/lock file — write should be allowed by the sandbox layer.
+            // (The OS may still block it; we only verify the sandbox check.)
+            Assert.DoesNotThrow(() => PathSandbox.ResolveWritable("Packages/com.unity.test/foo.cs"));
+        }
+
+        // -------------------------------------------------------------------------
+        // Control characters
+        // -------------------------------------------------------------------------
+
+        [Test]
+        public void Resolve_NulByte_Throws()
+        {
+            Assert.Throws<ArgumentException>(() => PathSandbox.Resolve("Assets/test\0evil"));
+        }
+
+        [Test]
+        public void Resolve_ControlCharacter_Throws()
+        {
+            Assert.Throws<ArgumentException>(() => PathSandbox.Resolve("Assets/test\x01evil"));
+        }
+
+        [Test]
+        public void Resolve_TabIsAllowed()
+        {
+            // Tab in a filename is valid (if unusual); ensure we don't over-block.
+            Assert.DoesNotThrow(() => PathSandbox.Resolve("Assets/with\tname.cs"));
+        }
     }
 }

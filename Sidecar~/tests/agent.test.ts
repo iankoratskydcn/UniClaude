@@ -1130,4 +1130,59 @@ describe("AgentRunner eager MCP connection", () => {
     const unity = mcpServers["uniclaude-unity"] as Record<string, unknown>;
     assert.equal(unity.url, "http://127.0.0.1:7777/rpc", "URL should use per-request mcpPort");
   });
+
+  it("appends auth token to MCP URL when configured", async () => {
+    let capturedArgs: Parameters<QueryFn>[0] | null = null;
+
+    const fakeQueryFn: QueryFn = (args) => {
+      capturedArgs = args;
+      return fakeConversation();
+    };
+
+    const runner = new AgentRunner({
+      mcpPort: 9999,
+      authToken: "abcdef0123456789",
+      onEvent: () => {},
+      queryFn: fakeQueryFn,
+    });
+
+    await runner.startQuery({ message: "hello" });
+
+    assert.ok(capturedArgs !== null, "queryFn was not called");
+    const opts = (capturedArgs as Parameters<QueryFn>[0]).options as Record<string, unknown>;
+    const mcpServers = opts.mcpServers as Record<string, unknown>;
+    const unity = mcpServers["uniclaude-unity"] as Record<string, unknown>;
+    assert.equal(
+      unity.url,
+      "http://127.0.0.1:9999/rpc?token=abcdef0123456789",
+      "URL should include the auth token as a query parameter"
+    );
+  });
+
+  it("URL-encodes auth tokens with special characters", async () => {
+    let capturedArgs: Parameters<QueryFn>[0] | null = null;
+
+    const fakeQueryFn: QueryFn = (args) => {
+      capturedArgs = args;
+      return fakeConversation();
+    };
+
+    const runner = new AgentRunner({
+      mcpPort: 9999,
+      authToken: "tok en+with/special=chars",
+      onEvent: () => {},
+      queryFn: fakeQueryFn,
+    });
+
+    await runner.startQuery({ message: "hello" });
+
+    const opts = (capturedArgs as Parameters<QueryFn>[0] as { options: Record<string, unknown> }).options;
+    const mcpServers = opts.mcpServers as Record<string, unknown>;
+    const unity = mcpServers["uniclaude-unity"] as Record<string, unknown>;
+    assert.equal(
+      unity.url,
+      "http://127.0.0.1:9999/rpc?token=tok%20en%2Bwith%2Fspecial%3Dchars",
+      "Special characters must be percent-encoded"
+    );
+  });
 });

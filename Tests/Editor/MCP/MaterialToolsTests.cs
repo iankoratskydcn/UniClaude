@@ -137,6 +137,25 @@ namespace UniClaude.Editor.Tests.MCP
         }
 
         [Test]
+        public void MaterialCreate_DestinationBlocked_ReturnsError()
+        {
+            var forbiddenDest = "Packages/com.arcforge.uniclaude/evil/TestMat.mat";
+            var result = MaterialTools.CreateMaterial(forbiddenDest, "Unlit/Color");
+            Assert.IsTrue(result.IsError);
+            Assert.That(result.Text, Does.Contain("com.arcforge.uniclaude"));
+        }
+
+        [Test]
+        public void MaterialDuplicate_DestinationBlocked_ReturnsError()
+        {
+            MaterialTools.CreateMaterial(_testMatPath);
+            var forbiddenDest = "Packages/com.arcforge.uniclaude/evil/TestMatCopy.mat";
+            var result = MaterialTools.DuplicateMaterial(_testMatPath, forbiddenDest);
+            Assert.IsTrue(result.IsError);
+            Assert.That(result.Text, Does.Contain("com.arcforge.uniclaude"));
+        }
+
+        [Test]
         public void MaterialSwapShader_ChangesShader()
         {
             MaterialTools.CreateMaterial(_testMatPath);

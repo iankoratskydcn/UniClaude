@@ -1,5 +1,6 @@
 // src/server.ts
-import express, { Request, Response } from "express";
+import express, { NextFunction, Request, Response } from "express";
+import { timingSafeEqual } from "node:crypto";
 import { AgentRunner } from "./agent.js";
 import type {
   ChatRequest,
@@ -14,11 +15,70 @@ const VERSION = "0.1.0";
 export interface ServerOptions {
   port: number;
   mcpPort: number;
+  /** Shared secret. Required on every endpoint via Authorization: Bearer or ?token=. */
+  authToken: string;
+}
+
+function constantTimeEqual(a: string, b: string): boolean {
+  // Compare equal-length buffers in constant time. timingSafeEqual throws when
+  // lengths differ, so we always compare same-length buffers (and let the
+  // length-mismatch case fall through to a normal mismatch result).
+  const ab = Buffer.from(a, "utf8");
+  const bb = Buffer.from(b, "utf8");
+  if (ab.length !== bb.length) {
+    // Still do a constant-time compare against ourselves to avoid a fast-path
+    // length oracle. The result is always false because a !== b.
+    timingSafeEqual(ab, ab);
+    return false;
+  }
+  return timingSafeEqual(ab, bb);
+}
+
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
+function isLoopbackHost(hostHeader: string | undefined): boolean {
+  if (!hostHeader) return true; // Some HTTP/1.0 clients omit Host.
+  const trimmed = hostHeader.trim();
+  if (trimmed.startsWith("[")) {
+    const end = trimmed.indexOf("]");
+    if (end < 0) return false;
+    const ip = trimmed.slice(1, end);
+    return LOOPBACK_HOSTS.has(ip) || LOOPBACK_HOSTS.has(`[${ip}]`);
+  }
+  const colon = trimmed.lastIndexOf(":");
+  const host = colon > 0 ? trimmed.slice(0, colon) : trimmed;
+  return LOOPBACK_HOSTS.has(host.toLowerCase());
 }
 
 export function createServer(options: ServerOptions) {
+  if (!options.authToken || options.authToken.length < 16) {
+    throw new Error("createServer: authToken is required (>= 16 chars)");
+  }
+
   const app = express();
   app.use(express.json({ limit: "10mb" }));
+
+  // Auth + DNS-rebind guard. Mounted before any route so all endpoints inherit it.
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (!isLoopbackHost(req.headers.host)) {
+      res.status(403).end();
+      return;
+    }
+    const header = req.headers["authorization"];
+    let presented: string | null = null;
+    if (typeof header === "string" && header.toLowerCase().startsWith("bearer ")) {
+      presented = header.slice("bearer ".length).trim();
+    } else if (typeof req.query.token === "string") {
+      presented = req.query.token;
+    }
+    if (!presented || !constantTimeEqual(options.authToken, presented)) {
+      res
+        .status(401)
+        .setHeader("WWW-Authenticate", 'Bearer realm="uniclaude-sidecar"')
+        .end();
+      return;
+    }
+    next();
+  });
 
   // SSE client management with event buffering for reconnect
   let sseClient: Response | null = null;
@@ -38,6 +98,7 @@ export function createServer(options: ServerOptions) {
 
   const agent = new AgentRunner({
     mcpPort: options.mcpPort,
+    authToken: options.authToken,
     onEvent: emitSSE,
   });
 

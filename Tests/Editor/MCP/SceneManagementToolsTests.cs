@@ -45,6 +45,18 @@ namespace UniClaude.Editor.Tests.MCP
         }
 
         [Test]
+        public void SceneSave_DestinationBlocked_ReturnsError()
+        {
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            var forbiddenSave = "Packages/com.arcforge.uniclaude/evil/SaveTest.unity";
+
+            var result = SceneManagementTools.SaveScene(forbiddenSave);
+
+            Assert.IsTrue(result.IsError);
+            Assert.That(result.Text, Does.Contain("com.arcforge.uniclaude"));
+        }
+
+        [Test]
         public void SceneCreate_CreatesNewScene()
         {
             var scenePath = $"{TestFolder}/NewScene.unity";

@@ -78,3 +78,40 @@ test("parseUpmUrl: non-string throws", () => {
   assert.throws(() => parseUpmUrl(null), /empty url/);
   assert.throws(() => parseUpmUrl(undefined), /empty url/);
 });
+
+test("parseUpmUrl: rejects unknown schemes", () => {
+  assert.throws(() => parseUpmUrl("ext::sh foo"), /scheme 'ext' is not allowed/);
+  assert.throws(() => parseUpmUrl("git+ext::sh foo"), /scheme 'ext' is not allowed/);
+  assert.throws(() => parseUpmUrl("javascript:alert(1)"), /scheme 'javascript' is not allowed/);
+});
+
+test("parseUpmUrl: rejects control characters", () => {
+  assert.throws(() => parseUpmUrl("https://example.com/repo\nrm -rf"), /control characters/);
+  assert.throws(() => parseUpmUrl("https://example.com/\x00"), /control characters/);
+});
+
+test("parseUpmUrl: rejects URL starting with dash (would be parsed as a git option)", () => {
+  assert.throws(() => parseUpmUrl("--upload-pack=evil"), /must include a scheme/);
+});
+
+test("parseUpmUrl: rejects ref containing whitespace or leading dash", () => {
+  assert.throws(
+    () => parseUpmUrl("https://example.com/repo.git#--evil"),
+    /ref contains unsafe characters/
+  );
+  assert.throws(
+    () => parseUpmUrl("https://example.com/repo.git#has space"),
+    /ref contains unsafe characters/
+  );
+});
+
+test("parseUpmUrl: rejects URL exceeding 2048 chars", () => {
+  const huge = "https://example.com/" + "a".repeat(3000);
+  assert.throws(() => parseUpmUrl(huge), /exceeds 2048/);
+});
+
+test("parseUpmUrl: accepts SSH shorthand (user@host:path)", () => {
+  const r = parseUpmUrl("git@github.com:user/repo.git");
+  assert.equal(r.url, "git@github.com:user/repo.git");
+  assert.equal(r.ref, null);
+});

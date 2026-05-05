@@ -175,5 +175,89 @@ namespace UniClaude.Editor.Tests.VersionTracker
             var r = await svc.CheckAsync(force: true);
             Assert.AreEqual(CheckStatus.UpToDate, r.Status);
         }
+
+        // ---------------------------------------------------------------------
+        // Sanitization
+        // ---------------------------------------------------------------------
+
+        [Test]
+        public void SanitizeUrl_RejectsNonHttps()
+        {
+            Assert.IsNull(VersionCheckService.SanitizeUrl("http://github.com/x/y/releases/tag/v1"));
+        }
+
+        [Test]
+        public void SanitizeUrl_RejectsNonGithubHost()
+        {
+            Assert.IsNull(VersionCheckService.SanitizeUrl("https://evil.example.com/x"));
+        }
+
+        [Test]
+        public void SanitizeUrl_AcceptsGithubAndSubdomain()
+        {
+            Assert.IsNotNull(VersionCheckService.SanitizeUrl("https://github.com/x/y"));
+            Assert.IsNotNull(VersionCheckService.SanitizeUrl("https://api.github.com/x/y"));
+        }
+
+        [Test]
+        public void SanitizeReleaseNotes_StripsControlChars()
+        {
+            var dirty = "release\u0001notes\u0007with\u001fbells";
+            var clean = VersionCheckService.SanitizeReleaseNotes(dirty);
+            Assert.AreEqual("releasenoteswithbells", clean);
+        }
+
+        [Test]
+        public void SanitizeReleaseNotes_KeepsTabAndNewline()
+        {
+            var input = "line one\nline two\twith tab\r\nfinal";
+            var clean = VersionCheckService.SanitizeReleaseNotes(input);
+            Assert.AreEqual(input, clean);
+        }
+
+        [Test]
+        public void SanitizeReleaseNotes_NeutralizesJavascriptScheme()
+        {
+            var input = "Click [me](javascript:alert(1)) please";
+            var clean = VersionCheckService.SanitizeReleaseNotes(input);
+            Assert.IsFalse(clean.Contains("javascript:"));
+            Assert.IsTrue(clean.Contains("blocked-scheme:"));
+        }
+
+        [Test]
+        public void SanitizeReleaseNotes_NeutralizesDataAndVbscriptSchemes()
+        {
+            var input = "[a](data:text/html,foo) [b](vbscript:msgbox)";
+            var clean = VersionCheckService.SanitizeReleaseNotes(input);
+            Assert.IsFalse(clean.Contains("data:"));
+            Assert.IsFalse(clean.Contains("vbscript:"));
+        }
+
+        [Test]
+        public void SanitizeReleaseNotes_TruncatesOversizedInput()
+        {
+            var huge = new string('a', 200_000);
+            var clean = VersionCheckService.SanitizeReleaseNotes(huge);
+            Assert.Less(clean.Length, 200_000);
+            Assert.IsTrue(clean.EndsWith("view full notes on GitHub)"));
+        }
+
+        [Test]
+        public async Task Check_RejectsNonGithubReleaseUrl()
+        {
+            const string payload = @"{
+                ""tag_name"": ""v0.3.0"",
+                ""body"": ""ok"",
+                ""html_url"": ""https://evil.example.com/x"",
+                ""published_at"": ""2026-04-20T08:00:00Z""
+            }";
+            var fake = new FakeFetcher { Next = new FetchResult { Ok = true, Body = payload } };
+            var svc = new VersionCheckService(fake, currentVersion: "0.2.0");
+            var r = await svc.CheckAsync(force: true);
+
+            // The check still succeeds — we just refuse to surface the bogus URL.
+            Assert.AreEqual(CheckStatus.UpdateAvailable, r.Status);
+            Assert.IsNull(r.ReleaseUrl);
+        }
     }
 }

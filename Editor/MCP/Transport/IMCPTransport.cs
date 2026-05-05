@@ -29,5 +29,13 @@ namespace UniClaude.Editor.MCP
         /// </summary>
         /// <param name="handler">The request handler function.</param>
         void SetRequestHandler(Func<string, Task<string>> handler);
+
+        /// <summary>
+        /// Set the shared-secret auth token that incoming requests must present (via the
+        /// <c>Authorization: Bearer &lt;token&gt;</c> header or a <c>?token=...</c> query param).
+        /// Pass null or empty to disable auth (testing only).
+        /// </summary>
+        /// <param name="token">The expected token, or null/empty to disable.</param>
+        void SetAuthToken(string token);
     }
 }

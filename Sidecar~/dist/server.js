@@ -6,11 +6,63 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createServer = createServer;
 // src/server.ts
 const express_1 = __importDefault(require("express"));
+const node_crypto_1 = require("node:crypto");
 const agent_js_1 = require("./agent.js");
 const VERSION = "0.1.0";
+function constantTimeEqual(a, b) {
+    const ab = Buffer.from(a, "utf8");
+    const bb = Buffer.from(b, "utf8");
+    if (ab.length !== bb.length) {
+        (0, node_crypto_1.timingSafeEqual)(ab, ab);
+        return false;
+    }
+    return (0, node_crypto_1.timingSafeEqual)(ab, bb);
+}
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
+function isLoopbackHost(hostHeader) {
+    if (!hostHeader)
+        return true;
+    const trimmed = hostHeader.trim();
+    if (trimmed.startsWith("[")) {
+        const end = trimmed.indexOf("]");
+        if (end < 0)
+            return false;
+        const ip = trimmed.slice(1, end);
+        return LOOPBACK_HOSTS.has(ip) || LOOPBACK_HOSTS.has(`[${ip}]`);
+    }
+    const colon = trimmed.lastIndexOf(":");
+    const host = colon > 0 ? trimmed.slice(0, colon) : trimmed;
+    return LOOPBACK_HOSTS.has(host.toLowerCase());
+}
 function createServer(options) {
+    if (!options.authToken || options.authToken.length < 16) {
+        throw new Error("createServer: authToken is required (>= 16 chars)");
+    }
     const app = (0, express_1.default)();
     app.use(express_1.default.json({ limit: "10mb" }));
+    // Auth + DNS-rebind guard. Mounted before any route so all endpoints inherit it.
+    app.use((req, res, next) => {
+        if (!isLoopbackHost(req.headers.host)) {
+            res.status(403).end();
+            return;
+        }
+        const header = req.headers["authorization"];
+        let presented = null;
+        if (typeof header === "string" && header.toLowerCase().startsWith("bearer ")) {
+            presented = header.slice("bearer ".length).trim();
+        }
+        else if (typeof req.query.token === "string") {
+            presented = req.query.token;
+        }
+        if (!presented || !constantTimeEqual(options.authToken, presented)) {
+            res
+                .status(401)
+                .setHeader("WWW-Authenticate", 'Bearer realm="uniclaude-sidecar"')
+                .end();
+            return;
+        }
+        next();
+    });
     // SSE client management with event buffering for reconnect
     let sseClient = null;
     let eventSeq = 0;
@@ -26,6 +78,7 @@ function createServer(options) {
     }
     const agent = new agent_js_1.AgentRunner({
         mcpPort: options.mcpPort,
+        authToken: options.authToken,
         onEvent: emitSSE,
     });
     // Heartbeat tracking
@@ -49,7 +102,6 @@ function createServer(options) {
         res.json(response);
     });
     app.get("/stream", (req, res) => {
-        // Close previous SSE client if any
         if (sseClient) {
             sseClient.end();
         }
@@ -58,7 +110,6 @@ function createServer(options) {
             "Cache-Control": "no-cache",
             Connection: "keep-alive",
         });
-        // Replay missed events if Last-Event-ID is provided
         const lastId = parseInt(req.headers["last-event-id"], 10);
         if (!isNaN(lastId)) {
             for (const entry of queryEventBuffer) {
@@ -68,7 +119,6 @@ function createServer(options) {
             }
         }
         sseClient = res;
-        // SSE keep-alive
         const keepAlive = setInterval(() => {
             res.write(": keepalive\n\n");
         }, 15_000);
@@ -90,11 +140,8 @@ function createServer(options) {
             res.status(400).json({ error: "message or attachments required" });
             return;
         }
-        // Clear previous query's event buffer
         queryEventBuffer = [];
-        // Respond immediately — events flow via SSE
         res.json({ ok: true });
-        // Start query in background (events emitted via SSE)
         agent.startQuery(request).catch((err) => {
             emitSSE({ type: "error", message: String(err) });
         });
@@ -139,7 +186,6 @@ function createServer(options) {
         const actualPort = typeof addr === "object" && addr ? addr.port : options.port;
         console.log(JSON.stringify({ status: "started", port: actualPort, version: VERSION }));
     });
-    // Cleanup on exit
     process.on("SIGTERM", () => {
         clearInterval(heartbeatInterval);
         server.close();

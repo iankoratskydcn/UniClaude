@@ -163,6 +163,11 @@ namespace UniClaude.Editor.MCP
             var resolvedName = ResolvePropertyName(serializedObject, propertyName, out var resolveError);
             if (resolvedName == null)
                 return MCPToolResult.Error(resolveError);
+
+            if (resolvedName.EndsWith("m_Script", StringComparison.Ordinal))
+                return MCPToolResult.Error(
+                    "Setting 'm_Script' is not allowed - it would silently change the component type.");
+
             var property = serializedObject.FindProperty(resolvedName);
 
             var value = GetSerializedPropertyValue(property);
@@ -308,6 +313,13 @@ namespace UniClaude.Editor.MCP
                             propErrors.Add($"{kvp.Key}: {resolveErr}");
                             continue;
                         }
+
+                        if (resolvedKey.EndsWith("m_Script", StringComparison.Ordinal))
+                        {
+                            propErrors.Add($"{kvp.Key}: Setting 'm_Script' is not allowed - it would silently change the component type.");
+                            continue;
+                        }
+
                         var property = serializedObject.FindProperty(resolvedKey);
 
                         try

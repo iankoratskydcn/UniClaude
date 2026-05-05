@@ -2,8 +2,10 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
+using UniClaude.Editor.MCP;
 using UnityEditor;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
@@ -44,13 +46,19 @@ namespace UniClaude.Editor
         /// <param name="settings">The current UniClaude user settings.</param>
         public async Task EnsureRunning(int mcpPort, UniClaudeSettings settings)
         {
+            var authToken = MCPServer.Instance?.AuthToken;
+            if (string.IsNullOrEmpty(authToken))
+                throw new InvalidOperationException(
+                    "Cannot start sidecar: MCP server has not generated an auth token yet. " +
+                    "MCPServer.Start must run before SidecarManager.EnsureRunning.");
+
             // Try reconnecting to existing process (domain reload)
             var savedPid = SessionState.GetInt(SessionKeyPid, 0);
             var savedPort = SessionState.GetInt(SessionKeyPort, 0);
 
             if (savedPid > 0 && savedPort > 0)
             {
-                if (await CheckHealth(savedPort))
+                if (await CheckHealth(savedPort, authToken))
                 {
                     _port = savedPort;
                     try { _process = Process.GetProcessById(savedPid); }
@@ -67,10 +75,10 @@ namespace UniClaude.Editor
                 TryKillProcess(savedPid);
             }
 
-            await Spawn(mcpPort, settings);
+            await Spawn(mcpPort, settings, authToken);
         }
 
-        async Task Spawn(int mcpPort, UniClaudeSettings settings)
+        async Task Spawn(int mcpPort, UniClaudeSettings settings, string authToken)
         {
             var nodePath = FindNodeBinary(settings.NodePath);
             if (nodePath == null)
@@ -113,6 +121,11 @@ namespace UniClaude.Editor
             if (!string.IsNullOrEmpty(home))
                 psi.Environment["HOME"] = home;
 
+            // Shared-secret auth token. Passed via env (rather than CLI args) so it
+            // doesn't appear in `ps` output. The sidecar requires this on its own
+            // HTTP endpoints AND uses it to authenticate calls back to the Unity MCP server.
+            psi.Environment["UNICLAUDE_AUTH_TOKEN"] = authToken;
+
             _process = Process.Start(psi);
             if (_process == null)
                 throw new InvalidOperationException("Failed to start sidecar process");
@@ -145,7 +158,7 @@ namespace UniClaude.Editor
                 throw new InvalidOperationException("Sidecar did not report a valid port");
 
             // Wait for health check
-            if (!await WaitForHealth(_port))
+            if (!await WaitForHealth(_port, authToken))
             {
                 _process.Kill();
                 throw new InvalidOperationException("Sidecar failed health check after startup");
@@ -158,13 +171,13 @@ namespace UniClaude.Editor
             Debug.Log($"[UniClaude] Sidecar started on port {_port} (PID {_process.Id})");
         }
 
-        async Task<bool> WaitForHealth(int port)
+        async Task<bool> WaitForHealth(int port, string authToken)
         {
             var elapsed = 0;
             var delay = 100;
             while (elapsed < HealthTimeoutMs)
             {
-                if (await CheckHealth(port))
+                if (await CheckHealth(port, authToken))
                     return true;
 
                 await Task.Delay(delay);
@@ -174,11 +187,14 @@ namespace UniClaude.Editor
             return false;
         }
 
-        static async Task<bool> CheckHealth(int port)
+        static async Task<bool> CheckHealth(int port, string authToken)
         {
             try
             {
-                var response = await _http.GetAsync($"http://127.0.0.1:{port}/health");
+                using var req = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}/health");
+                if (!string.IsNullOrEmpty(authToken))
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", authToken);
+                using var response = await _http.SendAsync(req);
                 return response.IsSuccessStatusCode;
             }
             catch
@@ -191,7 +207,8 @@ namespace UniClaude.Editor
         /// Public health check for use during setup verification.
         /// Returns true if the sidecar at the given port responds to /health.
         /// </summary>
-        public static Task<bool> CheckHealthPublic(int port) => CheckHealth(port);
+        public static Task<bool> CheckHealthPublic(int port)
+            => CheckHealth(port, MCPServer.Instance?.AuthToken);
 
         /// <summary>
         /// Periodic health ping — call from EditorApplication.update.
@@ -213,7 +230,8 @@ namespace UniClaude.Editor
         {
             try
             {
-                if (!await CheckHealth(_port))
+                var token = MCPServer.Instance?.AuthToken;
+                if (!await CheckHealth(_port, token))
                     Debug.LogWarning("[UniClaude] Sidecar health check failed");
             }
             catch (Exception ex)

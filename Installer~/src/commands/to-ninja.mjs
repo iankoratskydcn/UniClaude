@@ -13,6 +13,25 @@ import { parseUpmUrl } from "../upm-url.mjs";
 const UNICLAUDE_NAME = "com.arcforge.uniclaude";
 const PACKAGE_DIR = `Packages/${UNICLAUDE_NAME}`;
 
+// Git stores filter.<name>.clean / .smudge as a string and runs it through a
+// shell at filter time. Any path with a quote, backtick, dollar, semicolon, or
+// newline would let the shell reinterpret part of the path as code, so we
+// refuse to install the filter rather than ship a fragile escape routine that
+// differs between sh and cmd.exe.
+const SHELL_UNSAFE = /["'`$\\;&|<>()*?\s\r\n]/;
+function assertShellSafe(label, value) {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`${label} is empty`);
+  }
+  if (SHELL_UNSAFE.test(value)) {
+    throw new Error(
+      `${label} contains characters that cannot be safely embedded in a git filter ` +
+      `command (got: ${JSON.stringify(value)}). ` +
+      `Move the project (or Node.js) to a path without spaces or shell metacharacters.`
+    );
+  }
+}
+
 function defaultClone(upmUrl, dest) {
   const { url, ref } = parseUpmUrl(upmUrl);
 
@@ -78,6 +97,8 @@ export function toNinja({
   addFilterLine(projectRoot);
   const persistentForwardSlash = persistentInstaller.split("\\").join("/");
   const nodeForwardSlash = nodeBinary.split("\\").join("/");
+  assertShellSafe("Node.js path", nodeForwardSlash);
+  assertShellSafe("UniClaude installer path", persistentForwardSlash);
   git(projectRoot, ["config", "filter.uniclaude.clean",  `"${nodeForwardSlash}" "${persistentForwardSlash}" clean`]);
   git(projectRoot, ["config", "filter.uniclaude.smudge", `"${nodeForwardSlash}" "${persistentForwardSlash}" smudge`]);
   git(projectRoot, ["config", "filter.uniclaude.required", "true"]);

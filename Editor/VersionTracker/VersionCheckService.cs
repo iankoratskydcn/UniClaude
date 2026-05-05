@@ -1,4 +1,5 @@
 using System;
+using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 
@@ -15,6 +16,15 @@ namespace UniClaude.Editor.VersionTracker
 
         /// <summary>Sentinel error string from the fetcher meaning "no releases exist yet" (HTTP 404).</summary>
         public const string NoReleasesError = "No releases published yet";
+
+        /// <summary>Maximum length we'll cache for release notes. Anything longer is truncated.</summary>
+        const int MaxReleaseNotesLength = 64 * 1024;
+
+        /// <summary>Maximum length for a tag name. Generous but bounded.</summary>
+        const int MaxTagLength = 256;
+
+        /// <summary>Maximum length for the release URL.</summary>
+        const int MaxUrlLength = 1024;
 
         readonly IReleaseFetcher _fetcher;
         readonly string _currentVersion;
@@ -80,10 +90,10 @@ namespace UniClaude.Editor.VersionTracker
             try
             {
                 var json = JObject.Parse(fetch.Body);
-                tag = (string)json["tag_name"];
-                body = (string)json["body"];
-                url = (string)json["html_url"];
-                publishedAt = (string)json["published_at"];
+                tag = SanitizeShortField((string)json["tag_name"], MaxTagLength);
+                body = SanitizeReleaseNotes((string)json["body"]);
+                url = SanitizeUrl((string)json["html_url"]);
+                publishedAt = SanitizeShortField((string)json["published_at"], MaxTagLength);
                 if (string.IsNullOrEmpty(tag))
                     return new CheckResult
                     {
@@ -112,6 +122,94 @@ namespace UniClaude.Editor.VersionTracker
             UniClaudeSettings.Save(settings);
 
             return BuildResultFromSettings(settings);
+        }
+
+        /// <summary>
+        /// Strips control characters (other than tab/newline/CR) from a short metadata field
+        /// and enforces a length cap. Defends against terminal-injection style payloads in
+        /// response fields the user might display verbatim.
+        /// </summary>
+        internal static string SanitizeShortField(string input, int maxLen)
+        {
+            if (string.IsNullOrEmpty(input)) return input;
+            var sb = new StringBuilder(input.Length);
+            foreach (var c in input)
+            {
+                if (c == '\t' || c == '\n' || c == '\r' || c >= 0x20) sb.Append(c);
+            }
+            var s = sb.ToString();
+            if (s.Length > maxLen) s = s.Substring(0, maxLen);
+            return s;
+        }
+
+        /// <summary>
+        /// Cleans release-notes markdown before persisting: strips control characters,
+        /// rejects <c>javascript:</c> / <c>data:</c> / <c>vbscript:</c> URI schemes that
+        /// could otherwise be rendered as clickable links, and truncates to a sane upper bound.
+        /// </summary>
+        internal static string SanitizeReleaseNotes(string input)
+        {
+            if (string.IsNullOrEmpty(input)) return input;
+
+            // Strip control bytes (keep tab/newline/CR for legitimate markdown formatting).
+            var sb = new StringBuilder(input.Length);
+            foreach (var c in input)
+            {
+                if (c == '\t' || c == '\n' || c == '\r' || c >= 0x20) sb.Append(c);
+            }
+            var cleaned = sb.ToString();
+
+            // Disable a few URI schemes that have no business in release notes. We replace
+            // the scheme with a visible placeholder rather than removing characters so the
+            // user can see the original content was suspect.
+            cleaned = ReplaceSchemeCaseInsensitive(cleaned, "javascript:", "blocked-scheme:");
+            cleaned = ReplaceSchemeCaseInsensitive(cleaned, "data:",       "blocked-scheme:");
+            cleaned = ReplaceSchemeCaseInsensitive(cleaned, "vbscript:",   "blocked-scheme:");
+            cleaned = ReplaceSchemeCaseInsensitive(cleaned, "file:",       "blocked-scheme:");
+
+            if (cleaned.Length > MaxReleaseNotesLength)
+                cleaned = cleaned.Substring(0, MaxReleaseNotesLength) +
+                          "\n\n…(release notes truncated by UniClaude — view full notes on GitHub)";
+
+            return cleaned;
+        }
+
+        /// <summary>
+        /// Validates that the release URL is HTTPS and points at github.com or a subdomain.
+        /// Returns the URL when valid; null otherwise so the UI hides the "Open release" link
+        /// rather than directing the user to an unexpected destination.
+        /// </summary>
+        internal static string SanitizeUrl(string input)
+        {
+            if (string.IsNullOrEmpty(input)) return null;
+            if (input.Length > MaxUrlLength) return null;
+            if (!Uri.TryCreate(input, UriKind.Absolute, out var uri)) return null;
+            if (uri.Scheme != Uri.UriSchemeHttps) return null;
+            var host = uri.Host;
+            if (!host.Equals("github.com", StringComparison.OrdinalIgnoreCase) &&
+                !host.EndsWith(".github.com", StringComparison.OrdinalIgnoreCase))
+                return null;
+            return uri.ToString();
+        }
+
+        static string ReplaceSchemeCaseInsensitive(string input, string scheme, string replacement)
+        {
+            if (string.IsNullOrEmpty(input) || string.IsNullOrEmpty(scheme)) return input;
+            int idx = 0;
+            var sb = new StringBuilder(input.Length);
+            while (idx < input.Length)
+            {
+                int found = input.IndexOf(scheme, idx, StringComparison.OrdinalIgnoreCase);
+                if (found < 0)
+                {
+                    sb.Append(input, idx, input.Length - idx);
+                    break;
+                }
+                sb.Append(input, idx, found - idx);
+                sb.Append(replacement);
+                idx = found + scheme.Length;
+            }
+            return sb.ToString();
         }
 
         /// <summary>True when the last check is within <see cref="CacheTtl"/> of <paramref name="now"/>.</summary>

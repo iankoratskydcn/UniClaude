@@ -6,14 +6,14 @@ namespace UniClaude.Editor.Tests.MCP
 {
     /// <summary>
     /// Tests for <see cref="FileTools"/> MCP tool methods.
-    /// Uses a temporary directory under Library/UniClaude/test-temp/ for all file operations.
+    /// Uses a temporary directory under Assets/ for all file operations.
     /// </summary>
     public class FileToolsTests
     {
         /// <summary>
         /// The project-relative path to the temp directory used by all tests.
         /// </summary>
-        const string TempRelativeDir = "Library/UniClaude/test-temp";
+        const string TempRelativeDir = "Assets/UniClaudeTestTemp_FileTools";
 
         /// <summary>
         /// The absolute path to the temp directory.
@@ -78,6 +78,26 @@ namespace UniClaude.Editor.Tests.MCP
 
             Assert.IsFalse(result.IsError);
             Assert.That(result.Text, Does.Contain("\"lineCount\": 4"));
+        }
+
+        [Test]
+        public void ReadFile_TooLarge_ReturnsError()
+        {
+            var relativePath = TempRelativeDir + "/too-large.txt";
+            var absolutePath = Path.Combine(_tempAbsoluteDir, "too-large.txt");
+
+            const long MaxReadBytes = 10 * 1024 * 1024; // must match FileTools
+            var tooLarge = MaxReadBytes + 1024;
+
+            using (var fs = new FileStream(absolutePath, FileMode.Create, FileAccess.Write))
+            {
+                fs.SetLength(tooLarge);
+            }
+
+            var result = FileTools.ReadFile(relativePath);
+
+            Assert.IsTrue(result.IsError);
+            Assert.That(result.Text, Does.Contain("File is too large"));
         }
 
         [Test]
@@ -220,6 +240,26 @@ namespace UniClaude.Editor.Tests.MCP
             Assert.That(result.Text, Does.Contain("beta.cs"));
             Assert.That(result.Text, Does.Contain("delta.cs"));
             Assert.That(result.Text, Does.Not.Contain("gamma.txt"));
+        }
+
+        [Test]
+        public void FindFiles_LargeGlob_DoesNotThrow()
+        {
+            // Create enough files to exceed the internal 10,000 match cap.
+            var manyDir = Path.Combine(_tempAbsoluteDir, "glob-cap");
+            Directory.CreateDirectory(manyDir);
+
+            const int fileCount = 11000;
+            for (int i = 0; i < fileCount; i++)
+            {
+                File.WriteAllText(Path.Combine(manyDir, $"f_{i}.txt"), "");
+            }
+
+            var result = FileTools.FindFiles(TempRelativeDir + "/glob-cap/**/*.txt");
+
+            Assert.IsFalse(result.IsError, $"Expected success but got error: {result.Text}");
+            Assert.That(result.Text, Does.Contain("\"count\": 100"));
+            Assert.That(result.Text, Does.Contain("\"truncated\": true"));
         }
     }
 }

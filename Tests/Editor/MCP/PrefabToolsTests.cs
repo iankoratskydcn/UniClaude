@@ -119,6 +119,18 @@ namespace UniClaude.Editor.Tests.MCP
         }
 
         [Test]
+        public void CreatePrefabVariant_DestinationBlocked_ReturnsError()
+        {
+            var basePrefabPath = CreateTempPrefab("PrefabToolsTest_Base");
+            var forbiddenVariantPath = "Packages/com.arcforge.uniclaude/evil/PrefabToolsTest_Variant.prefab";
+
+            var result = PrefabTools.CreatePrefabVariant(basePrefabPath, forbiddenVariantPath);
+
+            Assert.IsTrue(result.IsError);
+            Assert.That(result.Text, Does.Contain("com.arcforge.uniclaude"));
+        }
+
+        [Test]
         public void InstantiatePrefab_CreatesInScene()
         {
             var prefabPath = CreateTempPrefab("PrefabToolsTest_Inst");

@@ -104,5 +104,24 @@ namespace UniClaude.Editor.Tests.MCP
             _server.Dispose();
             Assert.IsNull(MCPServer.Instance);
         }
+
+        [Test]
+        public void Start_GeneratesAuthToken()
+        {
+            _server.Start(new MCPSettings("Test_MCP_"));
+            Assert.IsNotNull(_server.AuthToken);
+            // 32 bytes hex-encoded -> 64 chars
+            Assert.AreEqual(64, _server.AuthToken.Length);
+            Assert.IsTrue(System.Text.RegularExpressions.Regex.IsMatch(_server.AuthToken, "^[0-9a-f]+$"));
+        }
+
+        [Test]
+        public void RotateAuthToken_ProducesADifferentToken()
+        {
+            _server.Start(new MCPSettings("Test_MCP_"));
+            var first = _server.AuthToken;
+            _server.RotateAuthToken();
+            Assert.AreNotEqual(first, _server.AuthToken);
+        }
     }
 }

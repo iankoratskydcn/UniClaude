@@ -14,6 +14,10 @@ namespace UniClaude.Editor.MCP
     /// </summary>
     public static class SceneTools
     {
+        const int MaxSceneSetupDepth = 64;
+        const int MaxSceneSetupNodes = 2000;
+        const int MaxHierarchyBuildDepth = 128;
+
         /// <summary>
         /// Lists all GameObjects in the active scene as a tree.
         /// </summary>
@@ -23,7 +27,7 @@ namespace UniClaude.Editor.MCP
         {
             var scene = SceneManager.GetActiveScene();
             var roots = scene.GetRootGameObjects();
-            var tree = roots.Select(BuildNode).ToArray();
+            var tree = roots.Select(go => BuildNode(go, 0)).ToArray();
             return MCPToolResult.Success(tree);
         }
 
@@ -240,9 +244,10 @@ namespace UniClaude.Editor.MCP
 
             Undo.IncrementCurrentGroup();
 
+            int totalNodes = 0;
             foreach (var def in defs)
             {
-                ProcessGameObjectDef(def, null, results, errors);
+                ProcessGameObjectDef(def, null, results, errors, 0, ref totalNodes);
             }
 
             var goCount = results.Count;
@@ -262,11 +267,33 @@ namespace UniClaude.Editor.MCP
         /// adds components with properties, and recurses into children.
         /// </summary>
         static void ProcessGameObjectDef(GameObjectDef def, Transform parentTransform,
-            List<object> results, List<object> errors)
+            List<object> results, List<object> errors, int depth, ref int totalNodes)
         {
             if (string.IsNullOrEmpty(def.Name))
             {
                 errors.Add(new { gameObject = "(unnamed)", operation = "create", error = "name is required" });
+                return;
+            }
+
+            if (depth > MaxSceneSetupDepth)
+            {
+                errors.Add(new
+                {
+                    gameObject = def.Name,
+                    operation = "create",
+                    error = $"Max hierarchy depth ({MaxSceneSetupDepth}) exceeded."
+                });
+                return;
+            }
+
+            if (++totalNodes > MaxSceneSetupNodes)
+            {
+                errors.Add(new
+                {
+                    gameObject = def.Name,
+                    operation = "create",
+                    error = $"Max node count ({MaxSceneSetupNodes}) exceeded."
+                });
                 return;
             }
 
@@ -384,7 +411,7 @@ namespace UniClaude.Editor.MCP
             {
                 foreach (var childDef in def.Children)
                 {
-                    ProcessGameObjectDef(childDef, go.transform, results, errors);
+                    ProcessGameObjectDef(childDef, go.transform, results, errors, depth + 1, ref totalNodes);
                 }
             }
         }
@@ -396,8 +423,11 @@ namespace UniClaude.Editor.MCP
         /// </summary>
         /// <param name="go">The GameObject to build a node for.</param>
         /// <returns>An anonymous object representing the node tree.</returns>
-        static object BuildNode(GameObject go)
+        static object BuildNode(GameObject go, int depth)
         {
+            if (depth >= MaxHierarchyBuildDepth)
+                return new { name = go.name, truncated = true };
+
             return new
             {
                 name = go.name,
@@ -407,7 +437,7 @@ namespace UniClaude.Editor.MCP
                     .Select(c => c.GetType().Name)
                     .ToArray(),
                 children = Enumerable.Range(0, go.transform.childCount)
-                    .Select(i => BuildNode(go.transform.GetChild(i).gameObject))
+                    .Select(i => BuildNode(go.transform.GetChild(i).gameObject, depth + 1))
                     .ToArray()
             };
         }

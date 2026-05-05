@@ -24,6 +24,15 @@ namespace UniClaude.Editor.MCP
             [MCPToolParam("Project-relative path for the new material (e.g. 'Assets/Materials/MyMat.mat')", required: true)] string path,
             [MCPToolParam("Shader name (e.g. 'Standard', 'Unlit/Color'). Defaults to 'Standard'")] string shaderName = "Standard")
         {
+            try
+            {
+                PathSandbox.ValidateAssetPath(path);
+            }
+            catch (Exception ex)
+            {
+                return MCPToolResult.Error(ex.Message);
+            }
+
             if (string.IsNullOrEmpty(shaderName))
                 shaderName = "Standard";
 
@@ -187,6 +196,15 @@ namespace UniClaude.Editor.MCP
             [MCPToolParam("Project-relative path of the source material", required: true)] string sourcePath,
             [MCPToolParam("Project-relative destination path for the duplicate", required: true)] string destPath)
         {
+            try
+            {
+                PathSandbox.ValidateAssetPath(destPath);
+            }
+            catch (Exception ex)
+            {
+                return MCPToolResult.Error(ex.Message);
+            }
+
             var sourceMat = AssetDatabase.LoadAssetAtPath<Material>(sourcePath);
             if (sourceMat == null)
                 return MCPToolResult.Error($"Source material not found at path: '{sourcePath}'.");

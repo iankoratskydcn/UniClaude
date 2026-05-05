@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Newtonsoft.Json;
 using UnityEditor;
@@ -13,6 +14,23 @@ namespace UniClaude.Editor.MCP
     /// </summary>
     public static class ProjectTools
     {
+        // Only allow direct, top-level safe UnityEditor settings containers.
+        static readonly HashSet<string> AllowedSettingsClasses =
+            new HashSet<string>(StringComparer.Ordinal) { "PlayerSettings", "EditorSettings" };
+
+        // Property names that often contain secrets/credentials. We never return values for these.
+        static readonly HashSet<string> BlockedSettingsProperties =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                // Android signing credentials
+                "keystorePass",
+                "keyaliasPass",
+                // iOS dev/team identifiers (often used alongside signing credentials)
+                "iOSAppleDeveloperTeamID",
+                "iOSManualProvisioningProfileID",
+                "tvOSManualProvisioningProfileID",
+            };
+
         /// <summary>
         /// Runs unit tests matching an optional filter and returns pass/fail/skip counts
         /// with failure details. Uses the TestRunnerApi to execute tests on the main thread.
@@ -20,7 +38,7 @@ namespace UniClaude.Editor.MCP
         /// <param name="filter">Optional test name filter (e.g. "MyTests" or "MyNamespace.MyClass.MyMethod"). Runs all tests if empty.</param>
         /// <param name="testMode">Test mode: "EditMode", "PlayMode", or "All" (default "EditMode").</param>
         /// <returns>Test results with pass/fail/skip counts and failure messages.</returns>
-        [MCPTool("project_run_tests", "Run unit tests with optional name filter. Returns pass/fail/skip counts and failure details.")]
+        [MCPTool("project_run_tests", "Run unit tests with optional name filter. EditMode runs synchronously. PlayMode (or All) enters PlayMode. Returns pass/fail/skip counts and failure details.")]
         public static MCPToolResult RunTests(
             [MCPToolParam("Test name filter (e.g. 'MyTests'). Empty = all tests.")] string filter,
             [MCPToolParam("Test mode: EditMode, PlayMode, or All (default EditMode)")] string testMode)
@@ -62,10 +80,15 @@ namespace UniClaude.Editor.MCP
 
                 if (results == null)
                 {
+                    var playModeWarning = mode.HasFlag(TestMode.PlayMode)
+                        ? "warning: PlayMode tests enter Play mode; unsaved scene changes may be lost."
+                        : null;
+
                     return MCPToolResult.Success(new
                     {
                         status = "executed",
-                        note = "Tests were dispatched. EditMode tests run synchronously; PlayMode tests run asynchronously and results may not be captured here."
+                        note = "Tests were dispatched. EditMode tests run synchronously; PlayMode tests run asynchronously and results may not be captured here.",
+                        warning = playModeWarning
                     });
                 }
 
@@ -78,6 +101,10 @@ namespace UniClaude.Editor.MCP
                     .Select(f => new { name = f.name, message = f.message })
                     .ToArray();
 
+                var warning = mode.HasFlag(TestMode.PlayMode)
+                    ? "warning: PlayMode tests enter Play mode; unsaved scene changes may be lost."
+                    : null;
+
                 return MCPToolResult.Success(new
                 {
                     total,
@@ -85,7 +112,8 @@ namespace UniClaude.Editor.MCP
                     failed,
                     skipped,
                     failures,
-                    duration = results.Duration
+                    duration = results.Duration,
+                    warning
                 });
             }
             finally
@@ -192,9 +220,8 @@ namespace UniClaude.Editor.MCP
                     settingsType = typeof(EditorSettings);
                     break;
                 default:
-                    // Try to find by name in UnityEditor namespace
-                    settingsType = typeof(EditorSettings).Assembly.GetType("UnityEditor." + className);
-                    break;
+                    return MCPToolResult.Error(
+                        $"Settings class '{className}' not found. Supported: PlayerSettings, EditorSettings.");
             }
 
             if (settingsType == null)
@@ -206,6 +233,9 @@ namespace UniClaude.Editor.MCP
                 System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
             if (prop != null)
             {
+                if (BlockedSettingsProperties.Contains(propertyName))
+                    return MCPToolResult.Error("Property not available.");
+
                 var value = prop.GetValue(null);
                 return MCPToolResult.Success(new
                 {
@@ -220,6 +250,9 @@ namespace UniClaude.Editor.MCP
                 System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
             if (field != null)
             {
+                if (BlockedSettingsProperties.Contains(propertyName))
+                    return MCPToolResult.Error("Property not available.");
+
                 var value = field.GetValue(null);
                 return MCPToolResult.Success(new
                 {
@@ -438,8 +471,40 @@ namespace UniClaude.Editor.MCP
             }
         }
 
-        static string EscapeJson(string s) =>
-            s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r");
+        /// <summary>
+        /// Escapes a string for embedding inside a JSON string literal. Handles every
+        /// character JSON requires escaping: backslash, double-quote, control bytes
+        /// 0x00-0x1F (using \u0000 form for the ones without short escapes), and the
+        /// 0x7F DEL byte. Avoids producing invalid JSON when log messages contain
+        /// arbitrary binary or non-ASCII control content.
+        /// </summary>
+        static string EscapeJson(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s ?? "";
+
+            var sb = new System.Text.StringBuilder(s.Length + 8);
+            for (int i = 0; i < s.Length; i++)
+            {
+                var c = s[i];
+                switch (c)
+                {
+                    case '\\': sb.Append("\\\\"); break;
+                    case '"':  sb.Append("\\\""); break;
+                    case '\b': sb.Append("\\b"); break;
+                    case '\f': sb.Append("\\f"); break;
+                    case '\n': sb.Append("\\n"); break;
+                    case '\r': sb.Append("\\r"); break;
+                    case '\t': sb.Append("\\t"); break;
+                    default:
+                        if (c < 0x20 || c == 0x7F)
+                            sb.Append("\\u").Append(((int)c).ToString("x4"));
+                        else
+                            sb.Append(c);
+                        break;
+                }
+            }
+            return sb.ToString();
+        }
 
         static string TruncateForStorage(string s) =>
             s.Length > 500 ? s.Substring(0, 500) : s;

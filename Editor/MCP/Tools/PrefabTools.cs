@@ -14,6 +14,8 @@ namespace UniClaude.Editor.MCP
     [InitializeOnLoad]
     public static class PrefabTools
     {
+        const int MaxHierarchyBuildDepth = 128;
+
         /// <summary>
         /// Registers cleanup for prefab editing sessions before domain reload
         /// to prevent leaked LoadPrefabContents handles.
@@ -132,7 +134,7 @@ namespace UniClaude.Editor.MCP
             var root = PrefabUtility.LoadPrefabContents(prefabPath);
             try
             {
-                var tree = BuildNode(root);
+                var tree = BuildNode(root, 0);
                 return MCPToolResult.Success(new { prefab = prefabPath, hierarchy = tree });
             }
             finally
@@ -162,6 +164,15 @@ namespace UniClaude.Editor.MCP
             [MCPToolParam("Property name", required: true)] string propertyName,
             [MCPToolParam("Value to set", required: true)] string value)
         {
+            try
+            {
+                PathSandbox.ValidateAssetPath(prefabPath);
+            }
+            catch (Exception ex)
+            {
+                return MCPToolResult.Error(ex.Message);
+            }
+
             var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
             if (prefab == null)
                 return MCPToolResult.Error($"Prefab not found at '{prefabPath}'.");
@@ -281,6 +292,15 @@ namespace UniClaude.Editor.MCP
             [MCPToolParam("Base prefab asset path", required: true)] string basePrefabPath,
             [MCPToolParam("Variant asset path", required: true)] string variantPath)
         {
+            try
+            {
+                PathSandbox.ValidateAssetPath(variantPath);
+            }
+            catch (Exception ex)
+            {
+                return MCPToolResult.Error(ex.Message);
+            }
+
             var basePrefab = AssetDatabase.LoadAssetAtPath<GameObject>(basePrefabPath);
             if (basePrefab == null)
                 return MCPToolResult.Error($"Base prefab not found at '{basePrefabPath}'.");
@@ -375,8 +395,11 @@ namespace UniClaude.Editor.MCP
         /// </summary>
         /// <param name="go">The GameObject to build a node for.</param>
         /// <returns>An anonymous object representing the node tree.</returns>
-        static object BuildNode(GameObject go)
+        static object BuildNode(GameObject go, int depth)
         {
+            if (depth >= MaxHierarchyBuildDepth)
+                return new { name = go.name, truncated = true };
+
             return new
             {
                 name = go.name,
@@ -386,7 +409,7 @@ namespace UniClaude.Editor.MCP
                     .Select(c => c.GetType().Name)
                     .ToArray(),
                 children = Enumerable.Range(0, go.transform.childCount)
-                    .Select(i => BuildNode(go.transform.GetChild(i).gameObject))
+                    .Select(i => BuildNode(go.transform.GetChild(i).gameObject, depth + 1))
                     .ToArray()
             };
         }

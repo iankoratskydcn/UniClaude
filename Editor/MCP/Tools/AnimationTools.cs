@@ -196,6 +196,15 @@ namespace UniClaude.Editor.MCP
             if (!path.EndsWith(".controller"))
                 return MCPToolResult.Error($"Path must end with '.controller'. Got: '{path}'");
 
+            try
+            {
+                PathSandbox.ValidateAssetPath(path);
+            }
+            catch (Exception ex)
+            {
+                return MCPToolResult.Error(ex.Message);
+            }
+
             if (AssetDatabase.LoadAssetAtPath<AnimatorController>(path) != null)
                 return MCPToolResult.Error(
                     $"AnimatorController already exists at '{path}'. Use animation_edit_controller to modify it.");

@@ -105,6 +105,13 @@ namespace UniClaude.Editor.MCP
                 return MCPToolResult.Error(message);
             }
 
+            const long MaxReadBytes = 10 * 1024 * 1024; // 10 MB
+            var info = new FileInfo(absolutePath);
+            if (info.Length > MaxReadBytes)
+                return MCPToolResult.Error(
+                    $"File is too large to read ({info.Length / 1024 / 1024} MB). " +
+                    $"Max allowed: {MaxReadBytes / 1024 / 1024} MB.");
+
             var content = File.ReadAllText(absolutePath);
             var lineCount = content.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None).Length;
 
@@ -342,6 +349,10 @@ namespace UniClaude.Editor.MCP
         /// <param name="results">The accumulator list for matching paths.</param>
         static void GlobSearchRecursive(string currentDir, string[] parts, int partIndex, List<string> results)
         {
+            const int MaxGlobMatches = 10_000;
+            if (results.Count >= MaxGlobMatches)
+                return;
+
             if (!Directory.Exists(currentDir))
                 return;
 

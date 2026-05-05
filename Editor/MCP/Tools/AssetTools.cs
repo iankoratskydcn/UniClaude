@@ -98,6 +98,15 @@ namespace UniClaude.Editor.MCP
             [MCPToolParam("Destination asset path (e.g. 'Assets/New/Player.cs')", required: true)]
             string destPath)
         {
+            try
+            {
+                PathSandbox.ValidateAssetPath(destPath);
+            }
+            catch (Exception ex)
+            {
+                return MCPToolResult.Error(ex.Message);
+            }
+
             var sourceType = AssetDatabase.GetMainAssetTypeAtPath(sourcePath);
             if (sourceType == null)
                 return MCPToolResult.Error($"Source asset not found at path: {sourcePath}");

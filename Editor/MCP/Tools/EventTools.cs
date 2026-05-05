@@ -27,7 +27,8 @@ namespace UniClaude.Editor.MCP
         /// <param name="argumentType">Optional argument type override.</param>
         /// <returns>Confirmation with listener count, or a contextual error.</returns>
         [MCPTool("event_add_listener", "Add a persistent listener to a UnityEvent (e.g. Button.onClick). " +
-            "Supports void methods and methods with a single argument (string, int, float, bool).")]
+            "Supports void methods and methods with a single argument (string, int, float, bool). " +
+            "Note: persistent listeners are saved to the scene/prefab and execute at game runtime.")]
         public static MCPToolResult AddListener(
             [MCPToolParam("GameObject with the event source component", required: true)] string gameObjectPath,
             [MCPToolParam("Component type containing the event (e.g. 'Button')", required: true)] string componentType,

@@ -17,6 +17,7 @@ namespace UniClaude.Editor.MCP
         HttpListener _listener;
         CancellationTokenSource _cts;
         Func<string, Task<string>> _requestHandler;
+        string _authToken;
         bool _running;
         int _port;
         int _connectedClients;
@@ -37,6 +38,110 @@ namespace UniClaude.Editor.MCP
         public void SetRequestHandler(Func<string, Task<string>> handler)
         {
             _requestHandler = handler;
+        }
+
+        /// <inheritdoc />
+        public void SetAuthToken(string token)
+        {
+            _authToken = token;
+        }
+
+        /// <summary>
+        /// Constant-time string compare. Avoids timing side-channels when comparing the
+        /// expected auth token against an attacker-supplied value.
+        /// </summary>
+        static bool ConstantTimeEquals(string a, string b)
+        {
+            if (a == null || b == null) return false;
+            if (a.Length != b.Length) return false;
+            int diff = 0;
+            for (int i = 0; i < a.Length; i++) diff |= a[i] ^ b[i];
+            return diff == 0;
+        }
+
+        /// <summary>
+        /// Validates that the request is authentic and originates from loopback. Returns true
+        /// when the request should proceed; false when it has been rejected (response already
+        /// written and closed by this method).
+        /// </summary>
+        bool AuthorizeRequest(HttpListenerContext context)
+        {
+            // Loopback-only: HttpListener is bound to 127.0.0.1, but we still confirm the
+            // remote endpoint is loopback in case a future config change drops that prefix.
+            var remote = context.Request.RemoteEndPoint?.Address;
+            if (remote == null || !IPAddress.IsLoopback(remote))
+            {
+                context.Response.StatusCode = 403;
+                context.Response.Close();
+                return false;
+            }
+
+            // Reject Host headers other than 127.0.0.1[:port] / localhost[:port] / [::1].
+            // This thwarts DNS-rebinding attacks where a malicious page resolves a domain
+            // it controls to 127.0.0.1 and then issues authenticated requests on the user's
+            // behalf. We also accept a missing Host header (HttpListener forwards on raw URI).
+            var host = context.Request.Headers["Host"];
+            if (!string.IsNullOrEmpty(host) && !IsLoopbackHost(host))
+            {
+                context.Response.StatusCode = 403;
+                context.Response.Close();
+                return false;
+            }
+
+            if (string.IsNullOrEmpty(_authToken))
+            {
+                // Server started without a token — reject every request to avoid an
+                // accidentally-open MCP server in dev configurations.
+                context.Response.StatusCode = 503;
+                context.Response.Close();
+                return false;
+            }
+
+            var presented = ExtractToken(context.Request);
+            if (presented == null || !ConstantTimeEquals(_authToken, presented))
+            {
+                context.Response.StatusCode = 401;
+                context.Response.Headers.Add("WWW-Authenticate", "Bearer realm=\"uniclaude-mcp\"");
+                context.Response.Close();
+                return false;
+            }
+
+            return true;
+        }
+
+        static bool IsLoopbackHost(string hostHeader)
+        {
+            // Strip an optional :port suffix — but only the last one, so IPv6 [::1]:1234 still works.
+            var trimmed = hostHeader.Trim();
+            if (trimmed.StartsWith("["))
+            {
+                var end = trimmed.IndexOf(']');
+                if (end < 0) return false;
+                var ip = trimmed.Substring(1, end - 1);
+                return IPAddress.TryParse(ip, out var addr) && IPAddress.IsLoopback(addr);
+            }
+            var colon = trimmed.LastIndexOf(':');
+            var hostPart = colon > 0 ? trimmed.Substring(0, colon) : trimmed;
+            if (string.Equals(hostPart, "localhost", StringComparison.OrdinalIgnoreCase)) return true;
+            return IPAddress.TryParse(hostPart, out var parsed) && IPAddress.IsLoopback(parsed);
+        }
+
+        static string ExtractToken(HttpListenerRequest request)
+        {
+            var authHeader = request.Headers["Authorization"];
+            if (!string.IsNullOrEmpty(authHeader))
+            {
+                const string bearer = "Bearer ";
+                if (authHeader.StartsWith(bearer, StringComparison.OrdinalIgnoreCase))
+                    return authHeader.Substring(bearer.Length).Trim();
+            }
+
+            // Fallback: query string `?token=...`. Required because the MCP HTTP client
+            // inside the Claude Agent SDK does not always forward custom headers.
+            var fromQuery = request.QueryString["token"];
+            if (!string.IsNullOrEmpty(fromQuery)) return fromQuery;
+
+            return null;
         }
 
         /// <inheritdoc />
@@ -137,6 +242,9 @@ namespace UniClaude.Editor.MCP
 
             try
             {
+                if (!AuthorizeRequest(context))
+                    return;
+
                 if (context.Request.HttpMethod == "POST" && path == "/rpc")
                     await HandleRPC(context);
                 else if (context.Request.HttpMethod == "GET" && path == "/sse")

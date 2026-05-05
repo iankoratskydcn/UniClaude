@@ -37,6 +37,15 @@ namespace UniClaude.Editor.MCP
                 return MCPToolResult.Success(new { saved = scene.path });
             }
 
+            try
+            {
+                PathSandbox.ValidateAssetPath(path);
+            }
+            catch (Exception ex)
+            {
+                return MCPToolResult.Error(ex.Message);
+            }
+
             var directory = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(directory))
                 EnsureFolderExists(directory);
@@ -58,6 +67,15 @@ namespace UniClaude.Editor.MCP
         {
             if (string.IsNullOrEmpty(path))
                 return MCPToolResult.Error("Scene path is required.");
+
+            try
+            {
+                PathSandbox.ValidateAssetPath(path);
+            }
+            catch (Exception ex)
+            {
+                return MCPToolResult.Error(ex.Message);
+            }
 
             var directory = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(directory))
@@ -117,6 +135,15 @@ namespace UniClaude.Editor.MCP
         {
             if (AssetDatabase.LoadAssetAtPath<SceneAsset>(sourcePath) == null)
                 return MCPToolResult.Error($"Source scene not found at '{sourcePath}'.");
+
+            try
+            {
+                PathSandbox.ValidateAssetPath(destPath);
+            }
+            catch (Exception ex)
+            {
+                return MCPToolResult.Error(ex.Message);
+            }
 
             var directory = Path.GetDirectoryName(destPath);
             if (!string.IsNullOrEmpty(directory))

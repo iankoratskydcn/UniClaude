@@ -65,6 +65,12 @@ export function buildContentBlocks(
 export interface AgentOptions {
   mcpPort: number;
   onEvent: (event: SSEEvent) => void;
+  /**
+   * Shared-secret token for the Unity MCP server. Forwarded as a `?token=...`
+   * query parameter so the MCP HTTP transport authenticates every callback.
+   * Optional in test fixtures.
+   */
+  authToken?: string;
   /** Optional query function override — used in tests to capture call arguments. */
   queryFn?: QueryFn;
 }
@@ -190,7 +196,7 @@ export class AgentRunner {
           mcpServers: {
             "uniclaude-unity": {
               type: "http" as const,
-              url: `http://127.0.0.1:${this._mcpPort}/rpc`,
+              url: this._buildMcpUrl(this._mcpPort),
             },
           },
           promptSuggestions: true,
@@ -548,5 +554,13 @@ export class AgentRunner {
       pending.resolve({ type: "deny", timeout: true });
     }
     this._pendingDecisions.clear();
+  }
+
+  /** Build the MCP server URL, including the auth token when one is configured. */
+  private _buildMcpUrl(port: number): string {
+    const base = `http://127.0.0.1:${port}/rpc`;
+    const token = this._options.authToken;
+    if (!token) return base;
+    return `${base}?token=${encodeURIComponent(token)}`;
   }
 }

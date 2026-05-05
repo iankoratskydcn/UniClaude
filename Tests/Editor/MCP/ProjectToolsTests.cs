@@ -94,6 +94,15 @@ namespace UniClaude.Editor.Tests.MCP
             Assert.That(result.Text, Does.Contain("PlayerSettings.productName"));
         }
 
+        [Test]
+        public void GetProjectSettings_KeystorePass_ReturnsError()
+        {
+            var result = ProjectTools.GetProjectSettings("PlayerSettings.keystorePass");
+
+            Assert.IsTrue(result.IsError);
+            Assert.That(result.Text, Does.Contain("not available").Or.Contain("Property not available"));
+        }
+
         /// <summary>
         /// Verifies that GetProjectSettings defaults to PlayerSettings when no class prefix is given.
         /// </summary>

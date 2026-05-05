@@ -191,6 +191,15 @@ namespace UniClaude.Editor.Tests.MCP
         }
 
         [Test]
+        public void CreateController_DestinationBlocked_ReturnsError()
+        {
+            var forbiddenPath = "Packages/com.arcforge.uniclaude/evil/Forbidden.controller";
+            var result = AnimationTools.CreateController(forbiddenPath, null, null, null);
+            Assert.IsTrue(result.IsError);
+            Assert.That(result.Text, Does.Contain("com.arcforge.uniclaude"));
+        }
+
+        [Test]
         public void EditController_AddState_AddsToExisting()
         {
             var states = "[{\"name\": \"Walking\"}]";

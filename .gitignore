@@ -2,6 +2,12 @@
 .DS_Store
 Thumbs.db
 
+.security-report
+.codeql-db
+out/
+.env
+PERF_REPORT.md
+
 # IDE
 .vscode/
 .idea/

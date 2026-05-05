@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
@@ -14,6 +15,8 @@ namespace UniClaude.Editor.MCP
     [InitializeOnLoad]
     public class MCPServer : IDisposable
     {
+        const string SessionKeyAuthToken = "UniClaude_MCP_AuthToken";
+
         static MCPServer _instance;
 
         IMCPTransport _transport;
@@ -21,6 +24,7 @@ namespace UniClaude.Editor.MCP
         IDomainReloadStrategy _reloadStrategy;
         MCPSettings _settings;
         ConcurrentQueue<WorkItem> _workQueue;
+        string _authToken;
         bool _disposed;
 
         /// <summary>Singleton for access from MCP tools and other editor components.</summary>
@@ -34,6 +38,13 @@ namespace UniClaude.Editor.MCP
 
         /// <summary>Port the MCP HTTP server is listening on. Returns 0 if not running.</summary>
         public int Port => (_transport as HttpTransport)?.Port ?? 0;
+
+        /// <summary>
+        /// Per-session authentication token shared with the Node.js sidecar.
+        /// Required on every MCP HTTP request and on every Sidecar HTTP request.
+        /// Rotated on every Editor launch (and reused across domain reloads via SessionState).
+        /// </summary>
+        public string AuthToken => _authToken;
 
         /// <summary>The active domain reload strategy.</summary>
         public IDomainReloadStrategy ActiveReloadStrategy => _reloadStrategy;
@@ -90,12 +101,20 @@ namespace UniClaude.Editor.MCP
             _dispatcher = new MCPDispatcher();
             _workQueue = new ConcurrentQueue<WorkItem>();
 
+            _authToken = SessionState.GetString(SessionKeyAuthToken, "");
+            if (string.IsNullOrEmpty(_authToken))
+            {
+                _authToken = GenerateAuthToken();
+                SessionState.SetString(SessionKeyAuthToken, _authToken);
+            }
+
             _reloadStrategy = settings.DomainReloadStrategy == ReloadStrategy.Manual
                 ? (IDomainReloadStrategy)new ManualReloadStrategy()
                 : new AutoReloadStrategy(settings.ReloadTimeoutSeconds);
 
             _transport = new HttpTransport();
             _transport.SetRequestHandler(EnqueueAndWait);
+            _transport.SetAuthToken(_authToken);
             _transport.Start(settings.Port);
 
             EditorApplication.update += ProcessMainThreadQueue;
@@ -105,6 +124,30 @@ namespace UniClaude.Editor.MCP
 
             if (_settings.LogLevel >= 1)
                 Debug.Log($"[UniClaude MCP] Server running on {_transport.Endpoint}");
+        }
+
+        static string GenerateAuthToken()
+        {
+            // 32 bytes = 256 bits of entropy. Hex-encoded for ASCII-safe transport
+            // through env vars, query strings, and HTTP headers.
+            var bytes = new byte[32];
+            using (var rng = RandomNumberGenerator.Create())
+                rng.GetBytes(bytes);
+            var sb = new System.Text.StringBuilder(bytes.Length * 2);
+            foreach (var b in bytes) sb.Append(b.ToString("x2"));
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Rotates the auth token. Caller is responsible for restarting the sidecar so it
+        /// receives the new value. Useful when the user clicks "Restart Sidecar" — we don't
+        /// want a previously-spawned process to keep working with stale credentials.
+        /// </summary>
+        public void RotateAuthToken()
+        {
+            _authToken = GenerateAuthToken();
+            SessionState.SetString(SessionKeyAuthToken, _authToken);
+            _transport?.SetAuthToken(_authToken);
         }
 
         /// <summary>Stops the server and cleans up resources.</summary>

@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
+using UniClaude.Editor.MCP;
 using UnityEngine;
 using UniClaude.Editor.UI;
 
@@ -105,6 +107,27 @@ namespace UniClaude.Editor
         }
 
         /// <summary>
+        /// Builds an authenticated <see cref="HttpRequestMessage"/> for the given method/path.
+        /// Reads the token from <see cref="MCPServer.Instance"/> on every call so a token rotation
+        /// (e.g. on sidecar restart) is picked up immediately.
+        /// </summary>
+        HttpRequestMessage BuildRequest(HttpMethod method, string path, HttpContent content = null)
+        {
+            var req = new HttpRequestMessage(method, $"{BaseUrl}{path}");
+            if (content != null) req.Content = content;
+            var token = MCPServer.Instance?.AuthToken;
+            if (!string.IsNullOrEmpty(token))
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            return req;
+        }
+
+        async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, HttpContent content = null)
+        {
+            using var req = BuildRequest(method, path, content);
+            return await _http.SendAsync(req);
+        }
+
+        /// <summary>
         /// Subscribes to the SSE event stream. Call before StartChat.
         /// </summary>
         public void ConnectStream()
@@ -161,7 +184,7 @@ namespace UniClaude.Editor
             }
 
             var content = new StringContent(body.ToString(), Encoding.UTF8, "application/json");
-            var response = await _http.PostAsync($"{BaseUrl}/chat", content);
+            var response = await SendAsync(HttpMethod.Post, "/chat", content);
 
             if ((int)response.StatusCode == 409)
                 throw new InvalidOperationException("A query is already active");
@@ -182,7 +205,7 @@ namespace UniClaude.Editor
             if (answer != null)
                 body["answer"] = answer;
             var content = new StringContent(body.ToString(), Encoding.UTF8, "application/json");
-            await _http.PostAsync($"{BaseUrl}/approve", content);
+            await SendAsync(HttpMethod.Post, "/approve", content);
         }
 
         /// <summary>Deny a pending permission request.</summary>
@@ -191,7 +214,7 @@ namespace UniClaude.Editor
         {
             var body = new JObject { ["id"] = id };
             var content = new StringContent(body.ToString(), Encoding.UTF8, "application/json");
-            await _http.PostAsync($"{BaseUrl}/deny", content);
+            await SendAsync(HttpMethod.Post, "/deny", content);
         }
 
         /// <summary>Returns true if the sidecar has an active query in progress.</summary>
@@ -199,7 +222,7 @@ namespace UniClaude.Editor
         {
             try
             {
-                var response = await _http.GetAsync($"{BaseUrl}/health");
+                var response = await SendAsync(HttpMethod.Get, "/health");
                 var json = await response.Content.ReadAsStringAsync();
                 var obj = JObject.Parse(json);
                 return obj["query_active"]?.Value<bool>() ?? false;
@@ -213,14 +236,14 @@ namespace UniClaude.Editor
         /// <summary>Cancel the active query (abort generation).</summary>
         public async Task Cancel()
         {
-            await _http.PostAsync($"{BaseUrl}/cancel", null);
+            await SendAsync(HttpMethod.Post, "/cancel");
         }
 
         /// <summary>Revert file changes made during the last agent turn.</summary>
         /// <returns>An <see cref="UndoResult"/> indicating success and a human-readable message.</returns>
         public async Task<UndoResult> Undo()
         {
-            var response = await _http.PostAsync($"{BaseUrl}/undo", null);
+            var response = await SendAsync(HttpMethod.Post, "/undo");
             var json = await response.Content.ReadAsStringAsync();
 
             try
@@ -244,7 +267,7 @@ namespace UniClaude.Editor
         {
             try
             {
-                var request = new HttpRequestMessage(HttpMethod.Get, $"{BaseUrl}/stream");
+                var request = BuildRequest(HttpMethod.Get, "/stream");
                 if (!string.IsNullOrEmpty(_lastEventId))
                     request.Headers.TryAddWithoutValidation("Last-Event-ID", _lastEventId);
 

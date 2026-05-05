@@ -629,8 +629,17 @@ namespace UniClaude.Editor.UI
                     try
                     {
                         using var http = new System.Net.Http.HttpClient();
-                        var resp = await http.GetStringAsync($"http://127.0.0.1:{_sidecar.Port}/health");
-                        var json = Newtonsoft.Json.Linq.JObject.Parse(resp);
+                        using var req = new System.Net.Http.HttpRequestMessage(
+                            System.Net.Http.HttpMethod.Get,
+                            $"http://127.0.0.1:{_sidecar.Port}/health");
+                        var token = UniClaude.Editor.MCP.MCPServer.Instance?.AuthToken;
+                        if (!string.IsNullOrEmpty(token))
+                            req.Headers.Authorization =
+                                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+                        using var resp = await http.SendAsync(req);
+                        if (!resp.IsSuccessStatusCode) return;
+                        var body = await resp.Content.ReadAsStringAsync();
+                        var json = Newtonsoft.Json.Linq.JObject.Parse(body);
                         var tools = json["trusted_tools"]?.ToObject<string[]>() ?? System.Array.Empty<string>();
                         EditorApplication.delayCall += () =>
                         {

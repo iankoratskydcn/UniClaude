@@ -422,5 +422,38 @@ namespace UniClaude.Editor.Tests.MCP
             Assert.AreEqual("Player", go.tag);
             Assert.AreEqual(LayerMask.NameToLayer("Default"), go.layer);
         }
+
+        [Test]
+        public void SceneSetup_DeepChildren_StopsBeforeStackOverflow()
+        {
+            // SceneTools enforces a max depth (~64). Build a single >64-deep chain.
+            object child = null;
+            for (int i = 70; i >= 1; i--)
+            {
+                var node = new Dictionary<string, object>
+                {
+                    ["name"] = $"Level{i}"
+                };
+
+                if (child != null)
+                    node["children"] = new object[] { child };
+
+                child = node;
+            }
+
+            var root = new Dictionary<string, object>
+            {
+                ["name"] = "DeepRoot",
+                ["children"] = new object[] { child }
+            };
+
+            var input = JsonConvert.SerializeObject(new object[] { root });
+
+            var result = SceneTools.SceneSetup(input);
+
+            Assert.IsFalse(result.IsError, $"Expected success wrapper (tool reported errors only), but got error: {result.Text}");
+            Assert.That(result.Text, Does.Contain("Max hierarchy depth"));
+            Assert.That(result.Text, Does.Contain("DeepRoot"));
+        }
     }
 }
